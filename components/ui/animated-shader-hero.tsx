@@ -9,13 +9,69 @@ export default function Hero() {
   const [activeScene, setActiveScene] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [currentWordIndex, setCurrentWordIndex] = useState<number | null>(null);
 
   useEffect(() => {
     window.speechSynthesis.cancel();
   }, []);
 
+  // 🧠 SMART DETECTOR
+  const isFictional = (text: string) => {
+    const lower = text.toLowerCase();
+
+    const nonFictionPatterns = [
+      "define", "explain", "what is", "difference between",
+      "list", "advantages", "disadvantages",
+      "short note", "long answer", "question",
+      "answer", "write about"
+    ];
+
+    const isStructured =
+      /\d+\./.test(text) ||
+      text.includes(":") ||
+      text.length < 40;
+
+    const isNonFiction = nonFictionPatterns.some(p =>
+      lower.includes(p)
+    );
+
+    if (isNonFiction || isStructured) return false;
+
+    const storytellingPatterns = [
+      "suddenly", "then", "after that",
+      "a man", "a woman", "a boy", "a girl",
+      "walks", "enters", "sees", "appears",
+      "dark", "mysterious", "magical",
+      "dragon", "king", "forest", "battle"
+    ];
+
+    return storytellingPatterns.some(p => lower.includes(p));
+  };
+
+  // 🎭 GENRE DETECTOR
+  const detectGenre = (text: string) => {
+    const lower = text.toLowerCase();
+
+    if (lower.includes("dragon") || lower.includes("king") || lower.includes("magic")) {
+      return "epic fantasy, cinematic lighting, ultra detailed, 4k, dramatic scene";
+    }
+    if (lower.includes("spaceship") || lower.includes("robot") || lower.includes("future")) {
+      return "futuristic sci-fi, neon lights, cyberpunk, ultra realistic, 4k";
+    }
+    if (lower.includes("dark") || lower.includes("ghost") || lower.includes("haunted")) {
+      return "dark horror, eerie shadows, cinematic horror lighting, ultra detailed";
+    }
+    if (lower.includes("love") || lower.includes("heart") || lower.includes("romantic")) {
+      return "romantic, soft lighting, dreamy atmosphere, cinematic, warm tones";
+    }
+
+    return "cinematic, ultra realistic, dramatic lighting, 4k";
+  };
+
+  // 🎬 SCENE SPLITTING
   const splitScenes = (text: string) => {
-    return text.split(/\.|and|then/).filter((s) => s.trim() !== "");
+    const parts = text.split(/\.|and|then/);
+    return parts.filter((s) => s.trim().length > 20);
   };
 
   const generate = async () => {
@@ -25,10 +81,20 @@ export default function Hero() {
     const result = [];
 
     for (let part of parts) {
+      const fictional = isFictional(part);
+      const genre = detectGenre(part);
+
+      if (!fictional && part.length < 50) {
+        result.push({ text: part, image: null });
+        continue;
+      }
+
       try {
+        const styledPrompt = `${genre}, ultra realistic, cinematic lighting, detailed scene of ${part}`;
+
         const res = await fetch("/api/contact", {
           method: "POST",
-          body: JSON.stringify({ text: part }),
+          body: JSON.stringify({ text: styledPrompt }),
         });
 
         const data = await res.json();
@@ -49,6 +115,7 @@ export default function Hero() {
     setScenes(result);
   };
 
+  // 🎧 PLAY WITH WORD HIGHLIGHT
   const playAll = async () => {
     if (scenes.length === 0) return;
 
@@ -58,12 +125,30 @@ export default function Hero() {
     for (let i = 0; i < scenes.length; i++) {
       setActiveScene(i);
 
-      await new Promise<void>((resolve) => {
-        const u = new SpeechSynthesisUtterance(scenes[i].text);
-        u.rate = speed;
-        u.onend = () => resolve();
+      const words = scenes[i].text.split(" ");
 
-        window.speechSynthesis.speak(u);
+      await new Promise<void>((resolve) => {
+        const utterance = new SpeechSynthesisUtterance(scenes[i].text);
+        utterance.rate = speed;
+
+        let index = 0;
+
+        const interval = setInterval(() => {
+          setCurrentWordIndex(index);
+          index++;
+
+          if (index >= words.length) {
+            clearInterval(interval);
+          }
+        }, 250 / speed);
+
+        utterance.onend = () => {
+          clearInterval(interval);
+          setCurrentWordIndex(null);
+          resolve();
+        };
+
+        window.speechSynthesis.speak(utterance);
       });
     }
 
@@ -76,11 +161,29 @@ export default function Hero() {
 
       <ParticleBackground />
 
-      <div className="absolute inset-0 bg-gradient-to-r from-orange-500 via-black to-yellow-500 opacity-80 pointer-events-none"></div>
+      <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-purple-700 to-pink-500 opacity-80 pointer-events-none"></div>
 
       <div className="relative z-20 w-full max-w-4xl">
 
-        {/* INPUT CENTER */}
+        {/* 🆕 NEW CHAT */}
+        {scenes.length > 0 && (
+          <div className="flex justify-end mb-4">
+            <button
+              onClick={() => {
+                setScenes([]);
+                setInput("");
+                setActiveScene(null);
+                window.speechSynthesis.cancel();
+                setIsPlaying(false);
+              }}
+              className="px-4 py-2 rounded border border-pink-400 text-pink-300 hover:bg-pink-500/20"
+            >
+              🆕 New Chat
+            </button>
+          </div>
+        )}
+
+        {/* INPUT */}
         {scenes.length === 0 && (
           <div className="flex flex-col items-center justify-center min-h-[60vh]">
 
@@ -93,12 +196,12 @@ export default function Hero() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Enter your story..."
-                className="flex-1 h-12 px-4 rounded-full bg-black border border-orange-500 text-orange-400"
+                className="flex-1 h-12 px-4 rounded-full bg-black border border-purple-400 text-pink-400"
               />
 
               <button
                 onClick={generate}
-                className="px-6 bg-orange-500 text-black rounded-full"
+                className="px-6 rounded-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white shadow-lg shadow-pink-500/30"
               >
                 Generate
               </button>
@@ -119,7 +222,7 @@ export default function Hero() {
                   setIsPlaying(false);
                 }
               }}
-              className="px-6 py-2 bg-orange-500 text-black rounded"
+              className="px-6 py-2 rounded bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg shadow-pink-500/30"
             >
               {isPlaying ? "⏸ Pause" : "▶ Play"}
             </button>
@@ -130,7 +233,7 @@ export default function Hero() {
                 setIsPlaying(false);
                 playAll();
               }}
-              className="px-4 py-2 border border-orange-500 rounded"
+              className="px-4 py-2 border border-purple-400 text-purple-300 rounded"
             >
               🔁 Restart
             </button>
@@ -138,7 +241,7 @@ export default function Hero() {
             <select
               value={speed}
               onChange={(e) => setSpeed(Number(e.target.value))}
-              className="bg-black border border-orange-500 px-2"
+              className="bg-black border border-purple-400 text-purple-300 px-2"
             >
               <option value={0.8}>0.8x</option>
               <option value={1}>1x</option>
@@ -156,21 +259,35 @@ export default function Hero() {
               key={i}
               className={`p-6 rounded-lg border ${
                 activeScene === i
-                  ? "border-orange-500 bg-black/80"
+                  ? "border-pink-500 bg-black/80"
                   : "border-gray-700 bg-black/60"
               }`}
             >
-              <p className="mb-4 text-lg">{scene.text}</p>
+              <p className="mb-4 text-lg leading-relaxed">
+                {scene.text.split(" ").map((word, index) => (
+                  <span
+                    key={index}
+                    className={`mr-1 ${
+                      activeScene === i && currentWordIndex === index
+                        ? "text-pink-400 font-bold"
+                        : "text-white"
+                    }`}
+                  >
+                    {word}
+                  </span>
+                ))}
+              </p>
 
-              <img
-                src={scene.image}
-                key={scene.image}
-                className="w-full rounded"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src =
-                    "https://picsum.photos/500";
-                }}
-              />
+              {scene.image && (
+                <img
+                  src={scene.image}
+                  className="w-full rounded"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src =
+                      "https://picsum.photos/500";
+                  }}
+                />
+              )}
             </div>
           ))}
         </div>
