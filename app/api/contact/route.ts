@@ -1,266 +1,190 @@
-"use client";
+import { NextResponse } from "next/server";
 
-import { useState, useEffect } from "react";
-import ParticleBackground from "@/components/ui/particles";
+type CinematicScene = {
+  id: string;
+  title: string;
+  narration: string;
+  mood: string;
+  image: string;
+  isFactual?: boolean;
+};
 
-export default function Hero() {
-  const [input, setInput] = useState("");
-  const [scenes, setScenes] = useState<any[]>([]);
-  const [activeScene, setActiveScene] = useState<number | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
+const beats = [
+  {
+    title: "Opening Frame",
+    mood: "wide establishing shot, silver rain, amber practical lights",
+  },
+  {
+    title: "Rising Motion",
+    mood: "tracking shot, kinetic camera movement, teal reflections",
+  },
+  {
+    title: "Revelation",
+    mood: "dramatic close up, crimson rim light, deep shadows",
+  },
+  {
+    title: "Final Echo",
+    mood: "epic final frame, gold dawn, atmospheric haze",
+  },
+];
 
-  useEffect(() => {
-    window.speechSynthesis.cancel();
-  }, []);
+function cleanText(value: unknown) {
+  if (typeof value !== "string") return "";
 
-  // 🧠 SMART DETECTOR
-  const isFictional = (text: string) => {
-    const lower = text.toLowerCase();
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/[<>]/g, "")
+    .trim()
+    .slice(0, 900);
+}
 
-    const nonFictionPatterns = [
-      "define", "explain", "what is", "difference between",
-      "list", "advantages", "disadvantages",
-      "short note", "long answer", "question",
-      "answer", "write about"
+function splitIntoStoryBeats(text: string) {
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (sentences.length >= 3) {
+    return sentences.slice(0, 4);
+  }
+
+  const words = text.split(" ").filter(Boolean);
+  const chunkSize = Math.max(8, Math.ceil(words.length / 3));
+  const chunks = [];
+
+  for (let index = 0; index < words.length; index += chunkSize) {
+    chunks.push(words.slice(index, index + chunkSize).join(" "));
+  }
+
+  return chunks.length > 1 ? chunks.slice(0, 4) : [text];
+}
+
+function buildImageUrl(text: string, mood: string) {
+  const prompt = [
+    "cinematic still frame",
+    "high detail",
+    "film grain",
+    "volumetric light",
+    "anamorphic lens",
+    mood,
+    text,
+  ].join(", ");
+
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(
+    prompt,
+  )}?width=1280&height=720&nologo=true&seed=${encodeURIComponent(text)}`;
+}
+
+async function fetchImageAsBase64(url: string, fallbackTitle: string): Promise<string> {
+  const safeFallbackUrl = `https://picsum.photos/seed/${encodeURIComponent(fallbackTitle).replace(/'/g, "%27").replace(/"/g, "%22")}/1280/720`;
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!response.ok) return safeFallbackUrl;
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return `data:${response.headers.get("content-type") || "image/jpeg"};base64,${buffer.toString("base64")}`;
+  } catch (err) {
+    console.error("Failed to fetch image securely from backend:", err);
+    return safeFallbackUrl;
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = (await req.json()) as { text?: unknown };
+    const text = cleanText(body.text);
+
+    if (!text) {
+      return NextResponse.json(
+        { error: "Add a few words to turn into a scene." },
+        { status: 400 },
+      );
+    }
+
+    // Smart detection for factual queries
+    const lowerText = text.toLowerCase();
+
+    // Broad factual keyword list covering academic, scientific, and encyclopedic language
+    const factualKeywords = [
+      // Questions
+      'what is', 'what are', 'what was', 'what were',
+      'who is', 'who was', 'who were', 'who invented', 'who discovered',
+      'where is', 'where was', 'where are', 'where did',
+      'when did', 'when was', 'when were', 'when is',
+      'how does', 'how do', 'how did', 'how is', 'how many', 'how much',
+      'why is', 'why did', 'why does', 'why was',
+      'which is', 'which was', 'which country',
+      // Academic / encyclopedic language
+      'history', 'biography', 'science', 'geography', 'mathematics',
+      'discovered', 'invented', 'founded', 'established', 'created by',
+      'born in', 'died in', 'born on', 'died on',
+      'capital of', 'located in', 'population of',
+      'definition', 'define', 'meaning of', 'refers to', 'known as',
+      'also known', 'according to', 'research shows', 'studies show',
+      'is true', 'in fact', 'historically', 'scientifically',
+      'the theory', 'the law of', 'the process of', 'the study of',
+      'revolution', 'civilization', 'ancient', 'medieval', 'century',
+      'orbit', 'atmosphere', 'gravity', 'element', 'molecule', 'atom',
+      'economic', 'political', 'geographic', 'biological', 'chemical',
+      'president', 'prime minister', 'monarch', 'emperor', 'kingdom',
+      'Nobel', 'Nobel Prize', 'discovered that', 'proved that',
+      'published', 'journal', 'university', 'institute', 'laboratory',
     ];
 
-    const isStructured =
-      /\d+\./.test(text) ||
-      text.includes(":") ||
-      text.length < 40;
+    // Also detect direct questions (starts with interrogative word)
+    const startsWithQuestion = /^(who|what|where|when|why|how|which|is|are|was|were|did|does|do|can|could|would|should)\b/i.test(text.trim());
 
-    const isNonFiction = nonFictionPatterns.some(p =>
-      lower.includes(p)
+    // Detect factual sentence patterns: "X is/was/are Y" with real-world subjects
+    const factualPatterns = [
+      /\b(is|are|was|were)\s+(a|an|the)\s+\w+/i,   // "X is a planet"
+      /\b\d{4}\b/,                                    // Contains a year (e.g. 1879, 2003)
+      /\b(BCE|CE|AD|BC)\b/,                           // Historical dates
+      /\b(km|miles|kg|lbs|meters|feet|mph|kph)\b/i,  // Measurements/units
+      /\b(percent|%)\b/i,                             // Statistics
+      /\b(planet|star|galaxy|species|element|compound|equation|theorem|law|dynasty|empire|republic|nation|continent|ocean|river|mountain)\b/i,
+    ];
+
+    const matchesKeyword = factualKeywords.some(kw => lowerText.includes(kw));
+    const matchesPattern = factualPatterns.some(pattern => pattern.test(text));
+    const isTextFactual = matchesKeyword || startsWithQuestion || matchesPattern;
+
+    const storyBeats = splitIntoStoryBeats(text);
+    
+    // Process all scenes in parallel on the server
+    const scenes: CinematicScene[] = await Promise.all(
+      storyBeats.map(async (beatText, index) => {
+        const beat = beats[index] ?? beats[beats.length - 1];
+
+        let securedBase64Image = "";
+        if (!isTextFactual) {
+           const rawImageUrl = buildImageUrl(beatText, beat.mood);
+           securedBase64Image = await fetchImageAsBase64(rawImageUrl, beatText);
+        }
+
+        return {
+          id: `scene-${index + 1}`,
+          title: isTextFactual ? "Fact Engine" : beat.title,
+          narration:
+            storyBeats.length === 1 && !isTextFactual
+              ? `In a cinematic vision, ${beatText}`
+              : beatText,
+          mood: isTextFactual ? "factual mode" : beat.mood,
+          image: securedBase64Image,
+          isFactual: isTextFactual,
+        };
+      })
     );
 
-    if (isNonFiction || isStructured) return false;
+    return NextResponse.json({
+      scenes,
+      source: text,
+    });
+  } catch (error) {
+    console.error("Error generating cinematic scenes:", error);
 
-    const storytellingPatterns = [
-      "suddenly", "then", "after that",
-      "a man", "a woman", "a boy", "a girl",
-      "walks", "enters", "sees", "appears",
-      "dark", "mysterious", "magical",
-      "dragon", "king", "forest", "battle"
-    ];
-
-    return storytellingPatterns.some(p => lower.includes(p));
-  };
-
-  // 🎭 GENRE DETECTOR
-  const detectGenre = (text: string) => {
-    const lower = text.toLowerCase();
-
-    if (lower.includes("dragon") || lower.includes("king") || lower.includes("magic")) {
-      return "epic fantasy, cinematic lighting, ultra detailed, 4k, dramatic scene";
-    }
-    if (lower.includes("spaceship") || lower.includes("robot") || lower.includes("future")) {
-      return "futuristic sci-fi, neon lights, cyberpunk, ultra realistic, 4k";
-    }
-    if (lower.includes("dark") || lower.includes("ghost") || lower.includes("haunted")) {
-      return "dark horror, eerie shadows, cinematic horror lighting, ultra detailed";
-    }
-    if (lower.includes("love") || lower.includes("heart") || lower.includes("romantic")) {
-      return "romantic, soft lighting, dreamy atmosphere, cinematic, warm tones";
-    }
-
-    return "cinematic, ultra realistic, dramatic lighting, 4k";
-  };
-
-  // 🔧 FIXED SCENE SPLITTING
-  const splitScenes = (text: string) => {
-    const parts = text.split(/\.|and|then/);
-    return parts.filter((s) => s.trim().length > 20);
-  };
-
-  const generate = async () => {
-    if (!input.trim()) return;
-
-    const parts = splitScenes(input);
-    const result = [];
-
-    for (let part of parts) {
-      const fictional = isFictional(part);
-      const genre = detectGenre(part);
-
-      if (!fictional && part.length < 50) {
-        result.push({ text: part, image: null });
-        continue;
-      }
-
-      try {
-        const styledPrompt = `${genre}, ultra realistic, cinematic lighting, detailed scene of ${part}`;
-
-        const res = await fetch("/api/contact", {
-          method: "POST",
-          body: JSON.stringify({ text: styledPrompt }),
-        });
-
-        const data = await res.json();
-
-        result.push({
-          text: part,
-          image: data.image,
-        });
-
-      } catch {
-        result.push({
-          text: part,
-          image: "https://picsum.photos/500",
-        });
-      }
-    }
-
-    setScenes(result);
-  };
-
-  const playAll = async () => {
-    if (scenes.length === 0) return;
-
-    window.speechSynthesis.cancel();
-    setIsPlaying(true);
-
-    for (let i = 0; i < scenes.length; i++) {
-      setActiveScene(i);
-
-      await new Promise<void>((resolve) => {
-        const u = new SpeechSynthesisUtterance(scenes[i].text);
-        u.rate = speed;
-        u.onend = () => resolve();
-
-        window.speechSynthesis.speak(u);
-      });
-    }
-
-    setIsPlaying(false);
-    setActiveScene(null);
-  };
-
-  return (
-    <div className="relative w-full min-h-screen flex flex-col items-center text-white overflow-y-auto px-4 py-10">
-
-      <ParticleBackground />
-
-      {/* 🌌 BACKGROUND */}
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-purple-700 to-pink-500 opacity-80 pointer-events-none"></div>
-
-      <div className="relative z-20 w-full max-w-4xl">
-
-        {/* 🆕 NEW CHAT BUTTON */}
-        {scenes.length > 0 && (
-          <div className="flex justify-end mb-4">
-            <button
-              onClick={() => {
-                setScenes([]);
-                setInput("");
-                setActiveScene(null);
-                window.speechSynthesis.cancel();
-                setIsPlaying(false);
-              }}
-              className="px-4 py-2 rounded border border-pink-400 text-pink-300 hover:bg-pink-500/20"
-            >
-              🆕 New Chat
-            </button>
-          </div>
-        )}
-
-        {/* INPUT */}
-        {scenes.length === 0 && (
-          <div className="flex flex-col items-center justify-center min-h-[60vh]">
-
-            <h1 className="text-4xl mb-6 font-bold">
-              Cinematic AI 🎬
-            </h1>
-
-            <div className="flex w-full gap-2">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Enter your story..."
-                className="flex-1 h-12 px-4 rounded-full bg-black border border-purple-400 text-pink-400"
-              />
-
-              <button
-                onClick={generate}
-                className="px-6 rounded-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white shadow-lg shadow-pink-500/30"
-              >
-                Generate
-              </button>
-            </div>
-
-          </div>
-        )}
-
-        {/* CONTROLS */}
-        {scenes.length > 0 && (
-          <div className="flex justify-center gap-4 mb-6 mt-6">
-
-            <button
-              onClick={() => {
-                if (!isPlaying) playAll();
-                else {
-                  window.speechSynthesis.pause();
-                  setIsPlaying(false);
-                }
-              }}
-              className="px-6 py-2 rounded bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg shadow-pink-500/30"
-            >
-              {isPlaying ? "⏸ Pause" : "▶ Play"}
-            </button>
-
-            <button
-              onClick={() => {
-                window.speechSynthesis.cancel();
-                setIsPlaying(false);
-                playAll();
-              }}
-              className="px-4 py-2 border border-purple-400 text-purple-300 rounded"
-            >
-              🔁 Restart
-            </button>
-
-            <select
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
-              className="bg-black border border-purple-400 text-purple-300 px-2"
-            >
-              <option value={0.8}>0.8x</option>
-              <option value={1}>1x</option>
-              <option value={1.5}>1.5x</option>
-              <option value={2}>2x</option>
-            </select>
-
-          </div>
-        )}
-
-        {/* SCENES */}
-        <div className="space-y-10 pb-20">
-          {scenes.map((scene, i) => (
-            <div
-              key={i}
-              className={`p-6 rounded-lg border ${
-                activeScene === i
-                  ? "border-pink-500 bg-black/80"
-                  : "border-gray-700 bg-black/60"
-              }`}
-            >
-              <p className="mb-4 text-lg">{scene.text}</p>
-
-              {scene.image && (
-                <img
-                  src={scene.image}
-                  className="w-full rounded"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src =
-                      "https://picsum.photos/500";
-                  }}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-
-      </div>
-    </div>
-  );
+    return NextResponse.json(
+      { error: "The cinematic engine could not shape that prompt." },
+      { status: 500 },
+    );
+  }
 }

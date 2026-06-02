@@ -1,35 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+type Particle = {
+  left: number;
+  duration: number;
+  delay: number;
+};
+
+const particles: Particle[] = Array.from({ length: 40 }, (_, index) => ({
+  left: (index * 37) % 100,
+  duration: 5 + ((index * 17) % 10),
+  delay: (index * 11) % 5,
+}));
 
 export default function ParticleBackground() {
-  const [particles, setParticles] = useState<any[]>([]);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-
-    const generated = Array.from({ length: 40 }).map(() => ({
-      left: Math.random() * 100,
-      duration: 5 + Math.random() * 10,
-      delay: Math.random() * 5,
-    }));
-
-    setParticles(generated);
-  }, []);
-
-  if (!mounted) return null;
-
   return (
     <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-      {particles.map((p, i) => (
+      {particles.map((particle, index) => (
         <span
-          key={i}
+          key={index}
           className="particle"
           style={{
-            left: `${p.left}%`,
-            animationDuration: `${p.duration}s`,
-            animationDelay: `${p.delay}s`,
+            left: `${particle.left}%`,
+            animationDuration: `${particle.duration}s`,
+            animationDelay: `${particle.delay}s`,
           }}
         />
       ))}
