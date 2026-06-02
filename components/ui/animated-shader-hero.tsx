@@ -1,8 +1,172 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ParticleBackground from "@/components/ui/particles";
+
+/* ─── Live cinematic idle animation ─────────────────────────────────────── */
+function CinematicIdle() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number>(0);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const t = performance.now() / 1000;
+
+    // Background
+    ctx.clearRect(0, 0, W, H);
+    const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    bg.addColorStop(0, "#0e0b1a");
+    bg.addColorStop(0.5, "#080612");
+    bg.addColorStop(1, "#040408");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Stars ──────────────────────────────────────────────────────────────
+    const starCount = 110;
+    for (let i = 0; i < starCount; i++) {
+      // deterministic positions via golden ratio
+      const px = ((i * 0.618033988749895) % 1) * W;
+      const py = ((i * 0.381966011250105) % 1) * H;
+      const twinkle = 0.4 + 0.6 * Math.sin(t * (1.2 + (i % 7) * 0.3) + i);
+      const r = 0.6 + (i % 3) * 0.5;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${twinkle * 0.8})`;
+      ctx.fill();
+    }
+
+    // ── Ambient nebula blobs ───────────────────────────────────────────────
+    const blobs = [
+      { x: W * 0.2, y: H * 0.3, r: W * 0.35, cr: "52,189,186", spd: 0.18 },
+      { x: W * 0.78, y: H * 0.65, r: W * 0.3, cr: "224,56,45", spd: 0.23 },
+      { x: W * 0.5, y: H * 0.85, r: W * 0.25, cr: "216,179,94", spd: 0.12 },
+    ];
+    blobs.forEach(({ x, y, r, cr, spd }) => {
+      const ox = Math.sin(t * spd) * W * 0.04;
+      const oy = Math.cos(t * spd * 1.3) * H * 0.04;
+      const grad = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+      const a = 0.04 + 0.025 * Math.sin(t * spd * 2);
+      grad.addColorStop(0, `rgba(${cr},${a})`);
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    });
+
+    // ── Film reel ──────────────────────────────────────────────────────────
+    const cx = W / 2;
+    const cy = H / 2;
+    const reelR = Math.min(W, H) * 0.18;
+    const angle = t * 0.55;
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, reelR, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(52,189,186,0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Spokes + sprocket holes
+    for (let s = 0; s < 6; s++) {
+      const sa = angle + (s / 6) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(sa) * reelR, cy + Math.sin(sa) * reelR);
+      ctx.strokeStyle = "rgba(52,189,186,0.2)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // sprocket hole
+      const hx = cx + Math.cos(sa) * reelR * 0.72;
+      const hy = cy + Math.sin(sa) * reelR * 0.72;
+      ctx.beginPath();
+      ctx.arc(hx, hy, reelR * 0.1, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(52,189,186,0.5)";
+      ctx.fill();
+    }
+
+    // Inner hub
+    const hubGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, reelR * 0.28);
+    hubGrad.addColorStop(0, "rgba(52,189,186,0.6)");
+    hubGrad.addColorStop(1, "rgba(52,189,186,0)");
+    ctx.beginPath();
+    ctx.arc(cx, cy, reelR * 0.28, 0, Math.PI * 2);
+    ctx.fillStyle = hubGrad;
+    ctx.fill();
+
+    // ── Orbiting particles ─────────────────────────────────────────────────
+    const orbits = [
+      { dist: reelR * 1.6, count: 5, color: "255,210,80",  speed: 0.4,  size: 2.5 },
+      { dist: reelR * 2.2, count: 8, color: "224,56,45",   speed: -0.25, size: 1.8 },
+      { dist: reelR * 2.9, count: 12, color: "52,189,186", speed: 0.18,  size: 1.4 },
+    ];
+    orbits.forEach(({ dist, count, color, speed, size }) => {
+      for (let i = 0; i < count; i++) {
+        const a = angle * speed + (i / count) * Math.PI * 2;
+        const px = cx + Math.cos(a) * dist;
+        const py = cy + Math.sin(a) * dist;
+        const alpha = 0.5 + 0.5 * Math.sin(t * 1.5 + i);
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${color},${alpha})`;
+        ctx.fill();
+      }
+    });
+
+    // ── Lens flare streak ──────────────────────────────────────────────────
+    const lfx = cx + Math.sin(t * 0.31) * W * 0.22;
+    const lfy = cy + Math.cos(t * 0.21) * H * 0.18;
+    const lf = ctx.createRadialGradient(lfx, lfy, 0, lfx, lfy, reelR * 1.1);
+    lf.addColorStop(0, `rgba(255,245,200,${0.18 + 0.12 * Math.sin(t * 0.7)})`);
+    lf.addColorStop(0.4, "rgba(255,200,80,0.06)");
+    lf.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = lf;
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Scanline ───────────────────────────────────────────────────────────
+    const slY = ((t * 0.18) % 1.1) * H;
+    const sl = ctx.createLinearGradient(0, slY - 3, 0, slY + 3);
+    sl.addColorStop(0,   "rgba(52,189,186,0)");
+    sl.addColorStop(0.5, "rgba(52,189,186,0.22)");
+    sl.addColorStop(1,   "rgba(52,189,186,0)");
+    ctx.fillStyle = sl;
+    ctx.fillRect(0, slY - 3, W, 6);
+
+    // ── Waiting text ───────────────────────────────────────────────────────
+    const alpha = 0.55 + 0.45 * Math.sin(t * 1.1);
+    ctx.font = `bold ${Math.round(W * 0.028)}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillStyle = `rgba(52,189,186,${alpha})`;
+    ctx.fillText("AWAITING PROMPT", cx, cy + reelR * 2.05);
+
+    rafRef.current = requestAnimationFrame(draw);
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => {
+      canvas.width  = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+    });
+    ro.observe(canvas);
+    canvas.width  = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    rafRef.current = requestAnimationFrame(draw);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
+    };
+  }, [draw]);
+
+  return <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />;
+}
 
 type CinematicScene = {
   id: string;
@@ -25,7 +189,7 @@ const posterImage =
   "https://image.pollinations.ai/prompt/cinematic%20film%20still%2C%20wide%20shot%2C%20rain%20on%20glass%2C%20warm%20spotlight%2C%20teal%20reflections%2C%20anamorphic%20lens%2C%20volumetric%20light%2C%20high%20detail?width=1280&height=720&nologo=true&seed=shader-hero-poster";
 
 export default function Hero() {
-  const [input, setInput] = useState(samplePrompts[0]);
+  const [input, setInput] = useState("");
   const [scenes, setScenes] = useState<CinematicScene[]>([]);
   const [activeScene, setActiveScene] = useState(0);
   const [state, setState] = useState<GenerationState>("idle");
@@ -40,7 +204,9 @@ export default function Hero() {
 
   const active = scenes[activeScene];
   const words = useMemo(() => active?.narration.split(/\s+/) ?? [], [active]);
-  const frameImage = imageFailed ? posterImage : active?.image ?? posterImage;
+  const frameImage = imageFailed
+    ? `https://picsum.photos/seed/${encodeURIComponent(active?.narration ?? "").replace(/'/g, "%27")}/1280/720`
+    : active?.image ?? "";
   const frameAlt = active?.title ?? "Cinematic poster frame";
   const storyboardSlots = useMemo<(CinematicScene | null)[]>(
     () => (scenes.length ? scenes : Array.from({ length: 4 }, () => null)),
@@ -227,7 +393,7 @@ export default function Hero() {
               onChange={(event) => setInput(event.target.value)}
               className="min-h-36 w-full resize-none rounded-md border border-[#6c6156] bg-[#111]/85 p-4 text-base leading-7 text-[#f6f1e8] outline-none transition focus:border-[#34bdba] focus:ring-2 focus:ring-[#34bdba]/30"
               maxLength={900}
-              placeholder="Describe the world, the character, or the feeling..."
+              placeholder="type text..."
             />
 
             <div className="flex flex-wrap gap-2">
@@ -291,24 +457,24 @@ export default function Hero() {
               </div>
             ) : (
               <>
-                {/* We use a background div for aesthetic sizing without ever showing a broken image icon */}
-                <div
-                  className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 ${imageFailed ? 'grayscale opacity-60 blend-luminosity' : ''}`}
-                  style={{
-                    backgroundImage: `url("${
-                      imageFailed
-                        ? `https://picsum.photos/seed/${encodeURIComponent(active?.narration || frameAlt).replace(/'/g, "%27")}/1280/720`
-                        : frameImage
-                    }")`,
-                  }}
-                />
-                {/* Hidden image block just to detect if Pollinations is blocked by ad-blocker/network */}
-                <img
-                  src={frameImage}
-                  className="hidden"
-                  alt="preloader"
-                  onError={() => setImageFailed(true)}
-                />
+                {/* Live idle animation when no scene has been generated yet */}
+                {!frameImage && <CinematicIdle />}
+
+                {/* Generated scene image */}
+                {frameImage && (
+                  <div
+                    className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 ${imageFailed ? 'grayscale opacity-60' : ''}`}
+                    style={{ backgroundImage: `url("${frameImage}")` }}
+                  />
+                )}
+                {frameImage && (
+                  <img
+                    src={frameImage}
+                    className="hidden"
+                    alt="preloader"
+                    onError={() => setImageFailed(true)}
+                  />
+                )}
               </>
             )}
             <div className={`absolute inset-0 ${active?.isFactual ? 'opacity-0' : 'bg-gradient-to-t from-black via-black/35 to-transparent'}`} />
@@ -332,16 +498,7 @@ export default function Hero() {
                     ))}
                   </p>
                 </div>
-            ) : (
-              <div className="relative z-10 max-w-xl p-6">
-                <p className="text-sm font-semibold uppercase text-[#34bdba]">
-                  Waiting for a prompt
-                </p>
-                <p className="mt-4 text-3xl font-black leading-tight text-white sm:text-5xl">
-                  Your first generated frame lands here.
-                </p>
-              </div>
-            )}
+            ) : null}
           </div>
 
           <div className="border-x border-b border-[#35302b] bg-[#0b0b0b]/95 p-4">
